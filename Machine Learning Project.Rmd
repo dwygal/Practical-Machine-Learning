@@ -1,0 +1,126 @@
+---
+title: "Practical Machine Learning Project"
+author: "Douglas Wygal"
+date: "5/24/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '~/training/coursera/MachineLearning')
+
+```
+# Writeup
+
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+The goal of this project is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to create a machine learning algorythm to measure how well the exercises were performed. The participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+More information is available from the website here:
+http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Cleaning the data
+A quick look at the training data revealed that there were several insignificant columns and rows such as usernames, timestamps, and window information, so the first step was to remove these columns and rows. This reduced the dimensions from (19622 by 160) to (19216 by 153). Next, all columns that had greater than 50% N/A values were removed. This action along with removing near zero values reduced the number of columns down to 53. This number of columns was much more manageable, but highly correlated variables also needed to be removed in order to improve accuracy and reduce runtime. Before removing correlated variables the dataset was visually inspected to get a better sense of any correlations. To accomplish this the "corrplot" package was used to generate the plot below. Looking at the plot revealed a few highly correlated variables. Using this visual aid as a guide a cutoff of 90% was used to remove these highly correlated variables. A final dimension check revealed that the train dataset was reduced to (19216 by 46). 
+
+
+## Model considerations
+After the data was cleaned a 70/30 split if the dataset was performed by using the createDataPartition function from the caret package. This ratio was chosen because a relatively large dataset was required in order to perform to a multiple fold cross-validation step. The trainControl function from the caret package was used to aid in cross-validation. The method was set to "cv" and the number of folds was set to 10. The learning method used for the model was Random Forest. This method was chosen because it offers a significantly lower risk of overfitting since it averages over many trees, and Random Forest usually performs at a lower variance reducing the chance of evaluating a classifier that doesn’t perform well because of the relationship between the train and test data. 
+
+## Conclusion
+The methods used for the project worked very well. The results from the confusion matrix shown below reveal marks in the high 90's for Sensitivity, Specificity, Positive Predicted Value, Negative Predicted Value, and Balanced Accuracy. Model Accuracy on the cross validation dataset was 0.9937533, so the expected out-of-sample error should also be above 90%. The Random Forest learning method also performed well with accuracy in the high 90's using an mtry parameter of 23 for final evaluation even though the number for an mtry parameter of 2 was almost identical. Variable Importance is also shown with yaw_belt, pitch_forearm, and pitch_belt being the most prevalent.
+
+
+# Code and Visualizatioins
+## Load necessary libraries
+```{r}
+suppressPackageStartupMessages({
+  library('caret')
+  library('ggplot2')
+  library('rpart')
+  library('dplyr')
+  library('reshape2')
+  library('corrplot')
+  library('e1071')
+})
+
+
+```
+
+## Getting and cleaning data
+```{r}
+testData <- read.csv("pml-testing.csv")
+trainData <- read.csv("pml-training.csv")
+# Show initial dimensions
+dim(testData)
+dim(trainData)
+
+# remove summary data from trainData
+trainDataFiltered <- trainData[!(trainData$new_window=="yes"),]
+
+
+# remove insignificant columns
+trainDataFiltered <- trainDataFiltered[, -c(1:7)]
+
+# remove columns with more than 50% empty values
+trainDataFiltered <- trainDataFiltered[, which(colMeans(!is.na(trainDataFiltered)) > 0.5)]
+
+# remove near zero varaince columns 
+nearZV <- nearZeroVar(trainDataFiltered)
+trainDataCleaned <- trainDataFiltered[, -nearZV]
+
+# we will check for correlations to see if we should remove and correlated columns
+corMatrix <- cor(trainDataCleaned[sapply(trainDataCleaned, is.numeric)])
+```
+
+### plotting the correlation matrix
+The color ramp in the plot shows that highly correlated variables are dark
+we will remove those variables that are above 90%
+```{r}
+corrplot(corMatrix, type = "upper",  
+         tl.col = "black", tl.srt = 45, tl.cex = .4)
+
+```
+```{r}
+isCorrelated <- findCorrelation(corMatrix, cutoff = .90)
+trainDataFinal <-trainDataCleaned[,-isCorrelated]
+# show final dimensions of the data after cleaning
+dim(trainDataFinal)
+
+
+```
+## Partitiion the data
+```{r}
+inTrain <- createDataPartition(y = trainDataFinal$classe, p=0.7, list=FALSE)
+training <- trainDataFinal[inTrain, ]
+crossValidation <- trainDataFinal[-inTrain, ]
+```
+## Tuning the model
+```{r}
+# set train control
+control <- trainControl(method = "cv", number = 10)
+
+```
+## Training the model
+```{r}
+# set train control
+modelFit <- train(classe ~ ., data = training, method = "rf", trControl = control, verbose = TRUE)
+modelFit
+
+```
+## Prediction
+```{r}
+# Using the model to predict the outcome on the cross-validation dataset
+prediction <- predict(modelFit, newdata = crossValidation)
+
+confMtrx <- confusionMatrix(prediction, reference = crossValidation$classe)
+confMtrx
+
+modelAccuarcy <- confMtrx$overall["Accuracy"]
+modelAccuarcy
+
+vImportance <- varImp(modelFit)$importance
+vImportance[head(order(unlist(vImportance), decreasing = TRUE), 5L), , drop = FALSE]
+
+```
+
